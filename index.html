@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dots and Boxes</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Playful Pastels -->
+    <!-- Application Structure Plan: A multi-screen SPA (Setup, Game, End Modal) managed by showing/hiding divs. This is ideal for the game's linear flow: configure -> play -> result. It isolates logic for each stage and provides an intuitive user journey without complex routing, perfectly suited for this project. -->
+    <!-- Visualization & Content Choices: The game grid is built with semantic HTML divs and styled with Tailwind, avoiding canvas for simplicity and easy styling. Interactive lines are clickable divs positioned between 'star' dots (Unicode chars). This allows for rich CSS animations and transitions, fitting the playful theme required by the PRD. Core interactions (line clicks, box claims) are handled by vanilla JS, updating the DOM directly. This choice prioritizes a fun, visually engaging experience tailored to the target user. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Nunito', sans-serif;
+            transition: background-color 0.7s ease;
+        }
+        h1, h2, h3, .button {
+            font-family: 'Fredoka One', cursive;
+        }
+        .celestial-background {
+            background-color: #EAD9F2;
+            background-image: linear-gradient(135deg, #FFD1DC 0%, #E0BBE4 100%);
+        }
+        .p1-turn-bg {
+             background-color: #ffdeeb; /* Darker, more noticeable pink */
+        }
+        .p2-turn-bg {
+            background-color: #d4f1f5; /* Darker, more noticeable teal */
+        }
+        .button {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .button:hover {
+            transform: translateY(-3px) scale(1.05);
+            box-shadow: 0px 8px 15px rgba(0, 0, 0, 0.1);
+        }
+        .dot {
+            font-size: 1.75rem; /* Slightly smaller for larger grids */
+            color: #957DAD; /* Lavender */
+            text-shadow: 0 0 5px rgba(255,255,255,0.7);
+        }
+        .line-wrapper {
+            position: absolute;
+            cursor: pointer;
+            z-index: 5;
+            /* background-color: rgba(0,255,0,0.2); */ /* Uncomment to see hover area */
+        }
+        .line {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(149, 125, 173, 0.3);
+            border-radius: 99px;
+            transition: all 0.3s ease;
+        }
+        .line-wrapper:hover .line {
+            transform: translate(-50%, -50%) scale(1.6);
+            z-index: 10;
+        }
+        .p1-hover .line-wrapper:not(.drawn):hover .line {
+            background-color: rgba(255, 105, 180, 0.7); /* Player 1 Pink hover */
+        }
+        .p2-hover .line-wrapper:not(.drawn):hover .line {
+            background-color: rgba(23, 162, 184, 0.7); /* Player 2 Teal hover */
+        }
+        .line-wrapper.drawn.p1 .line { background-color: #FF69B4; } /* Player 1 Pink */
+        .line-wrapper.drawn.p2 .line { background-color: #17A2B8; } /* Player 2 Teal */
+        
+        .box {
+            position: absolute;
+            transition: background-color 0.5s ease, opacity 0.5s ease;
+            opacity: 0;
+            z-index: -1;
+        }
+        .box.claimed {
+            opacity: 1;
+        }
+        .box.p1 { background-color: rgba(255, 105, 180, 0.4); }
+        .box.p2 { background-color: rgba(23, 162, 184, 0.4); }
+
+        .box-initial {
+            font-size: 2.5rem; /* Adjusted for scaling */
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            transform: scale(0.5);
+            transition: opacity 0.5s 0.2s ease, transform 0.5s 0.2s ease;
+        }
+        .box.claimed .box-initial {
+            opacity: 1;
+            transform: scale(1);
+        }
+        .box-initial.p1 { color: #d14a91; }
+        .box-initial.p2 { color: #107a8b; }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-out forwards;
+        }
+        @keyframes confetti-fall {
+            0% { transform: translateY(-100%) rotateZ(0deg); opacity: 1; }
+            100% { transform: translateY(100vh) rotateZ(720deg); opacity: 0; }
+        }
+        .confetti {
+            position: absolute;
+            width: 10px;
+            height: 20px;
+            background-color: #ff69b4;
+            top: -20px;
+            opacity: 0;
+            animation: confetti-fall 5s linear infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 celestial-background">
+    <div class="w-full max-w-lg mx-auto">
+        <!-- Setup Screen -->
+        <div id="setup-screen" class="bg-white/80 backdrop-blur-sm p-8 rounded-3xl shadow-2xl text-center fade-in">
+            <h1 class="text-5xl font-bold text-gray-800 mb-2">Dots & Boxes</h1>
+            <p class="text-gray-600 mb-6">A game of wits and squares!</p>
+            
+            <div id="grid-size-chooser" class="mb-6">
+                <h2 class="text-2xl text-gray-700 mb-4">Grid Size</h2>
+                <div class="flex justify-center gap-4">
+                    <button data-size="3" class="button grid-size-btn bg-purple-500 text-white px-6 py-3 rounded-full text-lg shadow-lg">3 x 3</button>
+                    <button data-size="5" class="button grid-size-btn bg-purple-300 text-white px-6 py-3 rounded-full text-lg shadow-lg">5 x 5</button>
+                </div>
+            </div>
+
+            <div class="mb-6">
+                <h2 class="text-2xl text-gray-700 mb-4">Choose Your Mode</h2>
+                <div class="flex justify-center gap-4">
+                    <button id="vs-player-btn" class="button bg-pink-400 text-white px-6 py-3 rounded-full text-lg shadow-lg">Player vs Player</button>
+                    <button id="vs-ai-btn" class="button bg-teal-400 text-white px-6 py-3 rounded-full text-lg shadow-lg">Player vs SparkleBot</button>
+                </div>
+            </div>
+
+            <div id="player-inputs" class="space-y-4 mb-6">
+                <div id="p1-input-group">
+                    <label for="player1" class="text-pink-500 font-bold">Player 1 Name</label>
+                    <input type="text" id="player1" class="w-full mt-1 p-3 border-2 border-pink-200 rounded-xl focus:ring-pink-400 focus:border-pink-400" placeholder="Enter name..." value="Player 1">
+                </div>
+                <div id="p2-input-group" class="hidden">
+                    <label for="player2" class="text-teal-500 font-bold">Player 2 Name</label>
+                    <input type="text" id="player2" class="w-full mt-1 p-3 border-2 border-teal-200 rounded-xl focus:ring-teal-400 focus:border-teal-400" placeholder="Enter name..." value="Player 2">
+                </div>
+            </div>
+
+            <div id="difficulty-chooser" class="hidden mb-6">
+                <h2 class="text-2xl text-gray-700 mb-4">Difficulty</h2>
+                <div class="flex justify-center gap-2 md:gap-4">
+                    <button data-level="easy" class="button difficulty-btn bg-green-400 text-white px-4 py-2 rounded-full shadow-md">Easy</button>
+                    <button data-level="medium" class="button difficulty-btn bg-yellow-400 text-white px-4 py-2 rounded-full shadow-md">Medium</button>
+                    <button data-level="hard" class="button difficulty-btn bg-red-400 text-white px-4 py-2 rounded-full shadow-md">Hard</button>
+                </div>
+            </div>
+            
+            <button id="start-game-btn" class="button bg-indigo-500 text-white w-full py-4 rounded-xl text-2xl shadow-xl hover:bg-indigo-600">Start Game</button>
+        </div>
+
+        <!-- Game Screen -->
+        <div id="game-screen" class="hidden">
+            <div class="grid grid-cols-2 gap-4 mb-4 text-center">
+                <div id="p1-score-card" class="p-4 rounded-2xl shadow-lg bg-pink-100 border-4 border-pink-300">
+                    <h3 id="p1-name" class="text-2xl text-pink-800">Player 1</h3>
+                    <p id="p1-score" class="text-5xl font-bold text-pink-600">0</p>
+                </div>
+                <div id="p2-score-card" class="p-4 rounded-2xl shadow-lg bg-teal-100 border-4 border-teal-300">
+                    <h3 id="p2-name" class="text-2xl text-teal-800">Player 2</h3>
+                    <p id="p2-score" class="text-5xl font-bold text-teal-600">0</p>
+                </div>
+            </div>
+            <div id="turn-indicator" class="text-center mb-4 text-2xl font-bold text-gray-700 bg-white/70 py-2 rounded-xl"></div>
+            
+            <div id="game-board-container" class="relative w-full max-w-sm mx-auto aspect-square">
+                <div id="game-board" class="relative w-full h-full"></div>
+            </div>
+
+            <button id="new-game-btn" class="button bg-gray-500 text-white w-full py-3 rounded-xl text-xl shadow-lg hover:bg-gray-600 mt-6">New Game</button>
+        </div>
+        
+        <!-- End Screen Modal -->
+        <div id="end-screen-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4">
+            <div class="bg-white p-8 rounded-3xl shadow-2xl text-center relative overflow-hidden max-w-sm w-full fade-in">
+                 <div id="confetti-container"></div>
+                <h2 id="winner-message" class="text-4xl font-bold text-gray-800 mb-6"></h2>
+                <button id="play-again-btn" class="button bg-purple-500 text-white py-3 px-8 rounded-xl text-2xl shadow-xl hover:bg-purple-600">Play Again</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const setupScreen = document.getElementById('setup-screen');
+        const gameScreen = document.getElementById('game-screen');
+        const endScreenModal = document.getElementById('end-screen-modal');
+
+        const gridSizeBtns = document.querySelectorAll('.grid-size-btn');
+        const vsPlayerBtn = document.getElementById('vs-player-btn');
+        const vsAiBtn = document.getElementById('vs-ai-btn');
+        const p1InputGroup = document.getElementById('p1-input-group');
+        const p2InputGroup = document.getElementById('p2-input-group');
+        const p1NameInput = document.getElementById('player1');
+        const p2NameInput = document.getElementById('player2');
+        const difficultyChooser = document.getElementById('difficulty-chooser');
+        const difficultyBtns = document.querySelectorAll('.difficulty-btn');
+        const startGameBtn = document.getElementById('start-game-btn');
+        const newGameBtn = document.getElementById('new-game-btn');
+        const playAgainBtn = document.getElementById('play-again-btn');
+
+        const p1NameDisplay = document.getElementById('p1-name');
+        const p2NameDisplay = document.getElementById('p2-name');
+        const p1ScoreDisplay = document.getElementById('p1-score');
+        const p2ScoreDisplay = document.getElementById('p2-score');
+        const p1ScoreCard = document.getElementById('p1-score-card');
+        const p2ScoreCard = document.getElementById('p2-score-card');
+        const turnIndicator = document.getElementById('turn-indicator');
+        const winnerMessage = document.getElementById('winner-message');
+
+        const gameBoard = document.getElementById('game-board');
+        
+        let gameState = {};
+
+        function initGameState() {
+            const isVsAi = gameState.gameMode === 'ai';
+            gameState.players = [
+                { name: p1NameInput.value.trim() || 'Player 1', score: 0, initial: (p1NameInput.value.trim() || 'P1').charAt(0).toUpperCase() },
+                { name: isVsAi ? 'SparkleBot' : (p2NameInput.value.trim() || 'Player 2'), score: 0, initial: isVsAi ? 'S' : (p2NameInput.value.trim() || 'P2').charAt(0).toUpperCase() }
+            ];
+            gameState.currentPlayerIndex = 0;
+            gameState.lines = {}; // Key: "x1-y1_x2-y2", Value: playerIndex
+            gameState.boxes = {}; // Key: "x-y", Value: playerIndex
+            gameState.gameOver = false;
+            gameState.playerTakesAnotherTurn = false;
+        }
+
+        function createBoard() {
+            gameBoard.innerHTML = '';
+            const GRID_SIZE = gameState.gridSize;
+            const boardSize = gameBoard.offsetWidth;
+            const step = boardSize / (GRID_SIZE - 1);
+            const lineThickness = 8; // in pixels
+            const targetSize = 36; // in pixels, for the hover/click area - INCREASED
+
+            // Create Lines
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    // Horizontal
+                    if (x < GRID_SIZE - 1) {
+                        const lineWrapper = document.createElement('div');
+                        const lineId = `${x}-${y}_${x+1}-${y}`;
+                        lineWrapper.className = 'line-wrapper horizontal';
+                        lineWrapper.style.width = `${step}px`;
+                        lineWrapper.style.height = `${targetSize}px`;
+                        lineWrapper.style.left = `${x * step}px`;
+                        lineWrapper.style.top = `${y * step - targetSize / 2}px`;
+                        lineWrapper.dataset.id = lineId;
+                        lineWrapper.addEventListener('click', () => handleLineClick(lineId));
+
+                        const line = document.createElement('div');
+                        line.className = 'line';
+                        line.style.width = `${step - lineThickness}px`;
+                        line.style.height = `${lineThickness}px`;
+                        
+                        lineWrapper.appendChild(line);
+                        gameBoard.appendChild(lineWrapper);
+                    }
+                    // Vertical
+                    if (y < GRID_SIZE - 1) {
+                        const lineWrapper = document.createElement('div');
+                        const lineId = `${x}-${y}_${x}-${y+1}`;
+                        lineWrapper.className = 'line-wrapper vertical';
+                        lineWrapper.style.width = `${targetSize}px`;
+                        lineWrapper.style.height = `${step}px`;
+                        lineWrapper.style.left = `${x * step - targetSize / 2}px`;
+                        lineWrapper.style.top = `${y * step}px`;
+                        lineWrapper.dataset.id = lineId;
+                        lineWrapper.addEventListener('click', () => handleLineClick(lineId));
+
+                        const line = document.createElement('div');
+                        line.className = 'line';
+                        line.style.width = `${lineThickness}px`;
+                        line.style.height = `${step - lineThickness}px`;
+                        
+                        lineWrapper.appendChild(line);
+                        gameBoard.appendChild(lineWrapper);
+                    }
+                }
+            }
+             // Create Boxes
+            for (let y = 0; y < GRID_SIZE - 1; y++) {
+                for (let x = 0; x < GRID_SIZE - 1; x++) {
+                    const box = document.createElement('div');
+                    const boxId = `${x}-${y}`;
+                    box.className = 'box';
+                    box.dataset.id = boxId;
+                    box.style.width = `${step * 0.8}px`;
+                    box.style.height = `${step * 0.8}px`;
+                    box.style.left = `${x * step + step * 0.1}px`;
+                    box.style.top = `${y * step + step * 0.1}px`;
+                    
+                    const initial = document.createElement('div');
+                    initial.className = 'box-initial';
+                    initial.style.fontSize = `${step * 0.4}px`; // Scale font size
+                    box.appendChild(initial);
+
+                    gameBoard.appendChild(box);
+                }
+            }
+            // Create Dots
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    const dot = document.createElement('div');
+                    dot.className = 'dot';
+                    dot.textContent = '★';
+                    dot.style.position = 'absolute';
+                    dot.style.left = `${x * step}px`;
+                    dot.style.top = `${y * step}px`;
+                    dot.style.transform = 'translate(-50%, -50%)';
+                    dot.style.fontSize = `${step * 0.2}px`; // Scale dot size
+                    gameBoard.appendChild(dot);
+                }
+            }
+        }
+
+        function updateUI() {
+            const bodyEl = document.body;
+            p1NameDisplay.textContent = gameState.players[0].name;
+            p2NameDisplay.textContent = gameState.players[1].name;
+            p1ScoreDisplay.textContent = gameState.players[0].score;
+            p2ScoreDisplay.textContent = gameState.players[1].score;
+            
+            const emojis = ['✨', '💖', '🌟', '🦄', '🌈', '🌸', '💡', '🎨'];
+            const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
+
+            if (gameState.gameOver) {
+                turnIndicator.textContent = 'Game Over!';
+                p1ScoreCard.style.transform = 'scale(1)';
+                p2ScoreCard.style.transform = 'scale(1)';
+            } else {
+                turnIndicator.textContent = `${randomEmoji} ${gameState.players[gameState.currentPlayerIndex].name}'s Turn ${randomEmoji}`;
+                p1ScoreCard.style.transform = gameState.currentPlayerIndex === 0 ? 'scale(1.05)' : 'scale(1)';
+                p2ScoreCard.style.transform = gameState.currentPlayerIndex === 1 ? 'scale(1.05)' : 'scale(1)';
+                p1ScoreCard.style.borderColor = gameState.currentPlayerIndex === 0 ? '#FF69B4' : '#fbcfe8';
+                p2ScoreCard.style.borderColor = gameState.currentPlayerIndex === 1 ? '#17A2B8' : '#cffafe';
+                
+                // Update background and hover color based on turn
+                bodyEl.classList.remove('p1-turn-bg', 'p2-turn-bg', 'celestial-background', 'p1-hover', 'p2-hover');
+                if (gameState.currentPlayerIndex === 0) {
+                    bodyEl.classList.add('p1-turn-bg', 'p1-hover');
+                } else {
+                    bodyEl.classList.add('p2-turn-bg', 'p2-hover');
+                }
+            }
+        }
+        
+        function handleLineClick(lineId) {
+            if (gameState.gameOver || gameState.lines.hasOwnProperty(lineId)) return;
+            
+            makeMove(lineId);
+
+            if (gameState.gameMode === 'ai' && gameState.currentPlayerIndex === 1 && !gameState.gameOver && !gameState.playerTakesAnotherTurn) {
+                setTimeout(runAITurn, 700);
+            }
+        }
+
+        function makeMove(lineId) {
+            if (gameState.gameOver || gameState.lines.hasOwnProperty(lineId)) return false;
+
+            document.querySelector(`.line-wrapper[data-id='${lineId}']`).classList.add('drawn', `p${gameState.currentPlayerIndex + 1}`);
+            gameState.lines[lineId] = gameState.currentPlayerIndex;
+
+            const newBoxesCompleted = checkBoxes();
+            
+            if (newBoxesCompleted > 0) {
+                gameState.playerTakesAnotherTurn = true;
+                gameState.players[gameState.currentPlayerIndex].score += newBoxesCompleted;
+            } else {
+                gameState.playerTakesAnotherTurn = false;
+                gameState.currentPlayerIndex = 1 - gameState.currentPlayerIndex;
+            }
+            
+            checkGameOver();
+            updateUI();
+
+            // After move is processed, if it's AI's turn again because it scored
+            if (newBoxesCompleted > 0 && gameState.gameMode === 'ai' && gameState.currentPlayerIndex === 1 && !gameState.gameOver) {
+                 setTimeout(runAITurn, 700);
+            }
+            
+            return true;
+        }
+
+        function checkBoxes() {
+            const GRID_SIZE = gameState.gridSize;
+            let boxesCompleted = 0;
+            for (let y = 0; y < GRID_SIZE - 1; y++) {
+                for (let x = 0; x < GRID_SIZE - 1; x++) {
+                    const boxId = `${x}-${y}`;
+                    if (gameState.boxes.hasOwnProperty(boxId)) continue;
+
+                    const top = `${x}-${y}_${x+1}-${y}`;
+                    const bottom = `${x}-${y+1}_${x+1}-${y+1}`;
+                    const left = `${x}-${y}_${x}-${y+1}`;
+                    const right = `${x+1}-${y}_${x+1}-${y+1}`;
+
+                    if (gameState.lines.hasOwnProperty(top) && gameState.lines.hasOwnProperty(bottom) && gameState.lines.hasOwnProperty(left) && gameState.lines.hasOwnProperty(right)) {
+                        gameState.boxes[boxId] = gameState.currentPlayerIndex;
+                        boxesCompleted++;
+                        
+                        const boxElem = document.querySelector(`.box[data-id='${boxId}']`);
+                        const playerClass = `p${gameState.currentPlayerIndex + 1}`;
+                        boxElem.classList.add('claimed', playerClass);
+                        const initialElem = boxElem.querySelector('.box-initial');
+                        initialElem.textContent = gameState.players[gameState.currentPlayerIndex].initial;
+                        initialElem.classList.add(playerClass);
+                    }
+                }
+            }
+            return boxesCompleted;
+        }
+        
+        function checkGameOver() {
+            const GRID_SIZE = gameState.gridSize;
+            const totalBoxes = (GRID_SIZE - 1) * (GRID_SIZE - 1);
+            if (Object.keys(gameState.boxes).length === totalBoxes) {
+                gameState.gameOver = true;
+                setTimeout(showEndScreen, 500);
+            }
+        }
+
+        function showEndScreen() {
+            const p1Score = gameState.players[0].score;
+            const p2Score = gameState.players[1].score;
+            let message = '';
+            if (p1Score > p2Score) {
+                message = `🎉 ${gameState.players[0].name} Wins! 🎉`;
+            } else if (p2Score > p1Score) {
+                message = `🎉 ${gameState.players[1].name} Wins! �`;
+            } else {
+                message = "It's a Draw! 🤝";
+            }
+            winnerMessage.innerHTML = message;
+            createConfetti();
+            endScreenModal.classList.remove('hidden');
+        }
+
+        function runAITurn() {
+            if(gameState.gameOver) return;
+            const GRID_SIZE = gameState.gridSize;
+
+            let availableLines = [];
+            document.querySelectorAll('.line-wrapper:not(.drawn)').forEach(line => availableLines.push(line.dataset.id));
+            
+            let move = null;
+
+            // 1. Find winning move
+            for(const lineId of availableLines) {
+                if(doesMoveScore(lineId)) {
+                    move = lineId;
+                    break;
+                }
+            }
+            
+            if (!move && gameState.difficulty !== 'easy') {
+                // 2. Find safe moves (don't give opponent a square)
+                let safeMoves = [];
+                for (const lineId of availableLines) {
+                    if (!doesMoveSetUpOpponent(lineId)) {
+                        safeMoves.push(lineId);
+                    }
+                }
+                
+                if (safeMoves.length > 0) {
+                     move = safeMoves[Math.floor(Math.random() * safeMoves.length)];
+                }
+            }
+            
+            // 3. If no other choice, pick random
+            if (!move) {
+                move = availableLines[Math.floor(Math.random() * availableLines.length)];
+            }
+            
+            makeMove(move);
+        }
+
+        function doesMoveScore(lineId) {
+            const GRID_SIZE = gameState.gridSize;
+            const tempLines = { ...gameState.lines, [lineId]: 1 };
+            for (let y = 0; y < GRID_SIZE - 1; y++) {
+                for (let x = 0; x < GRID_SIZE - 1; x++) {
+                    const top = `${x}-${y}_${x+1}-${y}`;
+                    const bottom = `${x}-${y+1}_${x+1}-${y+1}`;
+                    const left = `${x}-${y}_${x}-${y+1}`;
+                    const right = `${x+1}-${y}_${x+1}-${y+1}`;
+                    const sides = [top, bottom, left, right];
+                    const sidesDrawn = sides.filter(side => tempLines.hasOwnProperty(side)).length;
+                    if (sidesDrawn === 4 && !gameState.boxes.hasOwnProperty(`${x}-${y}`)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function doesMoveSetUpOpponent(lineId) {
+             if (gameState.difficulty !== 'hard') return false;
+             const GRID_SIZE = gameState.gridSize;
+             const tempLines = { ...gameState.lines, [lineId]: 1 };
+             let givesOpponentScore = false;
+
+             for (let y = 0; y < GRID_SIZE - 1; y++) {
+                for (let x = 0; x < GRID_SIZE - 1; x++) {
+                    const top = `${x}-${y}_${x+1}-${y}`;
+                    const bottom = `${x}-${y+1}_${x+1}-${y+1}`;
+                    const left = `${x}-${y}_${x}-${y+1}`;
+                    const right = `${x+1}-${y}_${x+1}-${y+1}`;
+                    const sides = [top, bottom, left, right];
+                    
+                    const sidesDrawn = sides.filter(side => tempLines.hasOwnProperty(side)).length;
+
+                    if (sidesDrawn === 3) {
+                        let potentialBoxIsAlreadyClaimed = false;
+                        sides.forEach(side => {
+                            if (!tempLines.hasOwnProperty(side)) {
+                                const tempLines2 = { ...tempLines, [side]: 0 }; // Pretend opponent draws it
+                                let sidesDrawn2 = 0;
+                                sides.forEach(s => {
+                                    if(tempLines2.hasOwnProperty(s)) sidesDrawn2++;
+                                });
+                                if (sidesDrawn2 === 4 && !gameState.boxes.hasOwnProperty(`${x}-${y}`)) {
+                                    // This move would complete a box
+                                } else if (sidesDrawn2 === 4) {
+                                    potentialBoxIsAlreadyClaimed = true;
+                                }
+                            }
+                        })
+                        if (!potentialBoxIsAlreadyClaimed) {
+                            givesOpponentScore = true;
+                            break;
+                        }
+                    }
+                }
+                if (givesOpponentScore) break;
+            }
+            return givesOpponentScore;
+        }
+
+        function createConfetti() {
+            const container = document.getElementById('confetti-container');
+            container.innerHTML = '';
+            const colors = ['#ff69b4', '#17a2b8', '#ffcf40', '#957DAD'];
+            for(let i = 0; i < 50; i++) {
+                const confetti = document.createElement('div');
+                confetti.className = 'confetti';
+                confetti.style.left = Math.random() * 100 + '%';
+                confetti.style.animationDelay = Math.random() * 5 + 's';
+                confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                container.appendChild(confetti);
+            }
+        }
+        
+        // Event Listeners for Setup
+        gridSizeBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                gameState.gridSize = parseInt(btn.dataset.size);
+                gridSizeBtns.forEach(b => b.classList.remove('bg-purple-500', 'ring-4', 'ring-purple-300'));
+                gridSizeBtns.forEach(b => b.classList.add('bg-purple-300'));
+                btn.classList.remove('bg-purple-300');
+                btn.classList.add('bg-purple-500', 'ring-4', 'ring-purple-300');
+            });
+        });
+
+        vsPlayerBtn.addEventListener('click', () => {
+            gameState.gameMode = 'player';
+            p2InputGroup.classList.remove('hidden');
+            difficultyChooser.classList.add('hidden');
+            vsPlayerBtn.classList.add('bg-pink-600', 'ring-4', 'ring-pink-300');
+            vsAiBtn.classList.remove('bg-teal-600', 'ring-4', 'ring-teal-300');
+        });
+
+        vsAiBtn.addEventListener('click', () => {
+            gameState.gameMode = 'ai';
+            p2InputGroup.classList.add('hidden');
+            difficultyChooser.classList.remove('hidden');
+            if(!gameState.difficulty) { // Set default
+                gameState.difficulty = 'medium';
+                document.querySelector('[data-level="medium"]').classList.add('bg-yellow-600', 'ring-4', 'ring-yellow-300');
+            }
+            vsAiBtn.classList.add('bg-teal-600', 'ring-4', 'ring-teal-300');
+            vsPlayerBtn.classList.remove('bg-pink-600', 'ring-4', 'ring-pink-300');
+        });
+
+        difficultyBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                gameState.difficulty = btn.dataset.level;
+                difficultyBtns.forEach(b => b.classList.remove('bg-green-600', 'bg-yellow-600', 'bg-red-600', 'ring-4', 'ring-green-300', 'ring-yellow-300', 'ring-red-300'));
+                
+                const color = btn.dataset.level === 'easy' ? 'green' : btn.dataset.level === 'medium' ? 'yellow' : 'red';
+                btn.classList.add(`bg-${color}-600`, `ring-4`, `ring-${color}-300`);
+            });
+        });
+
+        startGameBtn.addEventListener('click', () => {
+            if (!gameState.gameMode) {
+                alert('Please select a game mode!');
+                return;
+            }
+            if (gameState.gameMode === 'ai' && !gameState.difficulty) {
+                alert('Please select a difficulty level!');
+                return;
+            }
+            
+            setupScreen.classList.add('hidden');
+            gameScreen.classList.remove('hidden');
+            gameScreen.classList.add('fade-in');
+            
+            initGameState();
+            createBoard();
+            updateUI();
+        });
+
+        function resetGame() {
+            endScreenModal.classList.add('hidden');
+            gameScreen.classList.add('hidden');
+            setupScreen.classList.remove('hidden');
+            setupScreen.classList.add('fade-in');
+            
+            // Reset background
+            const bodyEl = document.body;
+            bodyEl.classList.remove('p1-turn-bg', 'p2-turn-bg', 'p1-hover', 'p2-hover');
+            bodyEl.classList.add('celestial-background');
+
+            // Reset setup screen UI
+            vsPlayerBtn.classList.remove('bg-pink-600', 'ring-4', 'ring-pink-300');
+            vsAiBtn.classList.remove('bg-teal-600', 'ring-4', 'ring-teal-300');
+            difficultyBtns.forEach(b => b.classList.remove('bg-green-600', 'bg-yellow-600', 'bg-red-600', 'ring-4', 'ring-green-300', 'ring-yellow-300', 'ring-red-300'));
+
+            p2InputGroup.classList.add('hidden');
+            difficultyChooser.classList.add('hidden');
+
+            gameState = {
+                gridSize: 3 // Reset to default
+            };
+            document.querySelector('[data-size="3"]').click(); // Set default grid size UI
+            vsPlayerBtn.click(); // Set default mode UI
+        }
+
+        newGameBtn.addEventListener('click', resetGame);
+        playAgainBtn.addEventListener('click', resetGame);
+
+        // Initial state
+        document.querySelector('[data-size="3"]').click();
+        vsPlayerBtn.click();
+    </script>
+</body>
+</html>
+�
